@@ -17,6 +17,7 @@ import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries"
 import { useUpdatableRuntimeIds } from "@multica/core/runtimes/hooks";
 import { useWSEvent } from "@multica/core/realtime";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
@@ -30,6 +31,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { PageHeader } from "../../layout/page-header";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
+import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
 import {
@@ -119,6 +121,16 @@ export function RuntimesPage({
   );
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+
+  // Custom runtime management is an admin-only affordance, gated the same
+  // way the runtime list gates delete: workspace owner/admin role.
+  const currentMember = currentUserId
+    ? members.find((m) => m.user_id === currentUserId)
+    : null;
+  const canManageProfiles =
+    currentMember?.role === "owner" || currentMember?.role === "admin";
+  const [showProfilesDialog, setShowProfilesDialog] = useState(false);
 
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
@@ -197,6 +209,8 @@ export function RuntimesPage({
         onConnectRemote={() => setShowConnectDialog(true)}
         cloudRuntimeEnabled={cloudRuntimeEnabled}
         onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
+        canManageProfiles={canManageProfiles}
+        onAddRuntime={() => setShowProfilesDialog(true)}
       />
 
       {showEmpty ? (
@@ -204,7 +218,7 @@ export function RuntimesPage({
           <EmptyState onConnectRemote={() => setShowConnectDialog(true)} />
         </div>
       ) : isMobile ? (
-        <div className="flex min-h-0 flex-1 flex-col border-t bg-background">
+        <div className="flex min-h-0 flex-1 flex-col bg-background">
           <MachineSidebar
             machines={filteredMachines}
             totalMachines={machines.length}
@@ -227,7 +241,7 @@ export function RuntimesPage({
           />
         </div>
       ) : (
-        <div className="min-h-0 flex-1 border-t bg-background">
+        <div className="min-h-0 flex-1 bg-background">
           <ResizablePanelGroup
             orientation="horizontal"
             className="min-h-0 flex-1"
@@ -276,6 +290,12 @@ export function RuntimesPage({
       {cloudRuntimeEnabled && showCloudRuntimeDialog && (
         <CloudRuntimeDialog onClose={() => setShowCloudRuntimeDialog(false)} />
       )}
+      {canManageProfiles && showProfilesDialog && (
+        <RuntimeProfilesDialog
+          wsId={wsId}
+          onClose={() => setShowProfilesDialog(false)}
+        />
+      )}
     </div>
   );
 }
@@ -290,11 +310,15 @@ function PageHeaderBar({
   onConnectRemote,
   cloudRuntimeEnabled,
   onOpenCloudRuntime,
+  canManageProfiles,
+  onAddRuntime,
 }: {
   totalCount: number;
   onConnectRemote: () => void;
   cloudRuntimeEnabled: boolean;
   onOpenCloudRuntime: () => void;
+  canManageProfiles: boolean;
+  onAddRuntime: () => void;
 }) {
   const { t } = useT("runtimes");
   return (
@@ -309,6 +333,17 @@ function PageHeaderBar({
         )}
       </div>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        {canManageProfiles && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onAddRuntime}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t(($) => $.profiles.cta)}
+          </Button>
+        )}
         {cloudRuntimeEnabled && (
           <Button
             type="button"
@@ -320,9 +355,20 @@ function PageHeaderBar({
             {t(($) => $.cloud_runtime.action)}
           </Button>
         )}
-        <Button type="button" size="sm" onClick={onConnectRemote}>
-          <Plus className="h-3 w-3" />
-          {t(($) => $.page.connect_remote)}
+        {/* Quiet chrome button (outline, icon-only below md) — primary is
+            reserved for the empty state's CTA. */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+          aria-label={t(($) => $.page.connect_remote)}
+          onClick={onConnectRemote}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">
+            {t(($) => $.page.connect_remote)}
+          </span>
         </Button>
       </div>
     </PageHeader>
@@ -733,7 +779,7 @@ function RuntimesPageSkeleton() {
       <PageHeader className="justify-between px-5">
         <Skeleton className="h-4 w-24" />
       </PageHeader>
-      <div className="flex min-h-0 flex-1 border-t">
+      <div className="flex min-h-0 flex-1">
         <div className="hidden w-[300px] shrink-0 border-r p-3 md:block">
           <Skeleton className="h-9 w-full rounded-md" />
           <div className="mt-3 flex gap-2">
