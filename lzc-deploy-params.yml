@@ -1,0 +1,46 @@
+params:
+  - id: jwt_secret
+    type: secret
+    name: JWT 密钥
+    description: >-
+      用于签发登录令牌的密钥。保持默认随机值即可；升级时请沿用原值，
+      否则所有已登录会话会失效。
+    default_value: "$random(len=48)"
+  - id: resend_api_key
+    type: secret
+    name: Resend API Key（可选）
+    description: >-
+      配置后登录验证码通过邮件（Resend）发送。留空时验证码会打印在
+      backend 容器日志中。可之后再在应用环境变量中补配并重启。
+    optional: true
+  - id: resend_from_email
+    type: string
+    name: Resend 发件地址（配合上面的 Key）
+    description: >-
+      必须是你在 resend.com/domains 验证过的域名下的邮箱（如
+      noreply@你的域名），否则 Resend 会拒发。测试可填
+      onboarding@resend.dev，但只能发给你 Resend 账号自己的邮箱。
+    default_value: onboarding@resend.dev
+  - id: allow_signup
+    type: bool
+    name: 允许注册新用户
+    description: >-
+      关闭后只有已存在的成员能登录。首次使用需要至少注册一个账号，
+      建议安装时保持开启，注册完成后再关闭。
+    default_value: "true"
+  - id: github_app_slug
+    type: string
+    name: GitHub App Slug（可选）
+    description: >-
+      GitHub App 集成（PR 镜像到卡片等）。填 GitHub App 的 slug，
+      即应用地址 https://github.com/apps/<slug> 的最后一段；
+      与下面的 Webhook Secret 同时填写才会启用。
+    optional: true
+  - id: github_webhook_secret
+    type: secret
+    name: GitHub Webhook Secret（可选）
+    description: >-
+      与 GitHub App webhook 配置里一致的 secret，用于事件验签和安装
+      流程签名。GitHub App 的 Webhook URL 填
+      https://<应用域名>/api/webhooks/github
+    optional: true

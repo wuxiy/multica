@@ -1,0 +1,17 @@
+package: cloud.lazycat.app.multica
+version: 0.6.1
+name: Multica
+description: AI agent team collaboration platform - issues, projects, agents and autopilots in one workspace, self-hosted with Docker images from the official GHCR registry
+author: wuxiy
+license: Apache-2.0
+homepage: https://github.com/multica-ai/multica
+locales:
+  zh-CN:
+    name: Multica
+    description: AI agent 团队协作平台。集议题、项目、agent 与自动化于一体，基于上游官方 Docker 镜像自部署，可与本机 multica CLI/daemon 联动调度 AI agent 干活。
+  en-US:
+    name: Multica
+    description: AI agent team collaboration platform. Issues, projects, agents and autopilots in one workspace, packaged from the official upstream Docker images.
+permissions:
+  required:
+    - net.internet

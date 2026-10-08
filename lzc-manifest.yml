@@ -1,0 +1,189 @@
+# Multica on Lazycat (LPK V2).
+#
+# Mirrors the upstream self-host stack (docker-compose.selfhost.yml):
+#   postgres - pgvector/pgvector:pg17 (data in /lzcapp/var/data/postgres)
+#   backend  - ghcr.io/multica-ai/multica-backend (Go API+WS, :8080,
+#              uploads in /lzcapp/var/data/uploads, runs migrations on boot)
+#   frontend - ghcr.io/multica-ai/multica-web (Next.js, :3000)
+#
+# Routing: the lzc gateway splits same-origin traffic the same way the Next.js
+# runtime proxy would (apps/web/proxy.ts), so the browser only ever sees one
+# domain: /api /v1 /uploads /ws /health go straight to the backend (prefix
+# kept; the gateway handles the WebSocket upgrade), everything else - plus
+# /auth/* which mixes frontend pages (/auth/callback) and backend endpoints -
+# goes to the Next.js frontend, whose runtime rewrite forwards the backend
+# parts to REMOTE_API_URL. The API paths are public_path: they sit behind
+# Multica's own auth (email code / JWT), so the multica CLI and agent daemon
+# on other machines can reach them without a browser login.
+usage: |
+  Multica：AI agent 团队协作平台（议题 / 项目 / agent / 自动化）。
+
+  登录：打开应用进入登录页，输入邮箱获取验证码。
+  - 安装时若填写了 Resend API Key，验证码会发到邮箱（推荐）。
+  - 未配置邮件时，验证码会打印在 backend 容器日志中（应用详情 → 日志，找
+    "[DEV] Verification code for ..." 行）。
+
+  连接你电脑上的 AI agent（可选）：在本地安装 multica CLI 和任意 agent
+  （如 claude / codex），然后执行：
+    multica config set server_url https://<应用域名>
+    multica config set app_url https://<应用域名>
+    multica login && multica daemon start
+  之后在 设置 → Runtimes 能看到你的机器，即可把任务分派给 agent。
+
+  数据（数据库与上传附件）保存在 /lzcapp/var/data，升级不会丢失。
+
+application:
+  subdomain: multica
+  routes:
+    # catch-all: the Next.js web app (it also proxies the backend-served
+    # /auth/* endpoints that are NOT frontend callback pages)
+    - /=http://frontend:3000
+  upstreams:
+    # backend API surfaces, served at the root of the Go server: keep the
+    # full path (disable_trim_location). Exact + trailing-slash forms both
+    # listed because lzc-ingress matches locations exactly.
+    - location: /api
+      backend: http://backend:8080
+      disable_trim_location: true
+    - location: /api/
+      backend: http://backend:8080
+      disable_trim_location: true
+    - location: /v1
+      backend: http://backend:8080
+      disable_trim_location: true
+    - location: /v1/
+      backend: http://backend:8080
+      disable_trim_location: true
+    - location: /uploads
+      backend: http://backend:8080
+      disable_trim_location: true
+    - location: /uploads/
+      backend: http://backend:8080
+      disable_trim_location: true
+    # realtime WebSocket (exact path, matches the web client and the daemon)
+    - location: /ws
+      backend: http://backend:8080
+      disable_trim_location: true
+    # daemon/login probe ("multica setup self-host" treats non-200 as unreachable)
+    - location: /health
+      backend: http://backend:8080
+      disable_trim_location: true
+  public_path:
+    # reached by the multica CLI / agent daemon and by same-origin browser
+    # XHR/WebSocket; Multica's own auth (cookies / JWT) protects these
+    - /api
+    - /v1
+    - /uploads
+    - /ws
+    - /health
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      - POSTGRES_DB=multica
+      - POSTGRES_USER=multica
+      # only reachable inside this app's compose network (no ingress is
+      # published for it), matching the upstream self-host defaults
+      - POSTGRES_PASSWORD=multica
+    binds:
+      - /lzcapp/var/data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U multica -d multica"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    image: ghcr.io/multica-ai/multica-backend:v0.6.1
+    environment:
+      - DATABASE_URL=postgres://multica:multica@postgres:5432/multica?sslmode=disable
+      - PORT=8080
+      - APP_ENV=production
+      # "if" guards on every .U reference: a param the box has not stored yet
+      # renders as the literal "<no value>" without the guard, which is a
+      # non-empty string and silently flips flags like isGitHubConfigured()
+      - JWT_SECRET={{ if .U.jwt_secret }}{{ .U.jwt_secret }}{{ end }}
+      # the box gateway is the only way in, so all external URLs are the app
+      # domain; FRONTEND_ORIGIN also feeds the CORS + WebSocket origin checks
+      - FRONTEND_ORIGIN=https://{{ .S.AppDomain }}
+      - MULTICA_APP_URL=https://{{ .S.AppDomain }}
+      - MULTICA_PUBLIC_URL=https://{{ .S.AppDomain }}
+      - MULTICA_DAEMON_SERVER_URL=https://{{ .S.AppDomain }}
+      # the gateway forwards from the box's internal networks; trusting those
+      # keeps the webhook rate limiter on real client IPs
+      - MULTICA_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      - ALLOW_SIGNUP={{ if .U.allow_signup }}true{{ else }}false{{ end }}
+      # GitHub App integration: slug + webhook secret together flip
+      # isGitHubConfigured() on; webhook endpoint is POST /api/webhooks/github
+      # (already routed + public_path), webhook URL derives from
+      # MULTICA_PUBLIC_URL above
+      - GITHUB_APP_SLUG={{ if .U.github_app_slug }}{{ .U.github_app_slug }}{{ end }}
+      - GITHUB_WEBHOOK_SECRET={{ if .U.github_webhook_secret }}{{ .U.github_webhook_secret }}{{ end }}
+      # personal-device default: no anonymous deployment telemetry
+      - DO_NOT_TRACK=1
+      - RESEND_API_KEY={{ if .U.resend_api_key }}{{ .U.resend_api_key }}{{ end }}
+      # upstream falls back to noreply@multica.ai when empty, which only works
+      # with Multica's own Resend key — a personal key needs the user's own
+      # verified-domain sender (deploy param)
+      - RESEND_FROM_EMAIL={{ if .U.resend_from_email }}{{ .U.resend_from_email }}{{ end }}
+    binds:
+      - /lzcapp/var/data/uploads:/app/data/uploads
+      # repo-browse credentials (GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY PEM):
+      # the PEM is multi-line, which neither the wizard's single-line params
+      # nor a YAML env value can hold — it lives in this sourced env file
+      - /lzcapp/var/config:/config
+    setup_script: |
+      # lpk forbids setup_script (init) together with entrypoint/command, so
+      # patch the image's entrypoint in place instead: prepend a loader that
+      # exports /config/github-app.env before the original boot sequence.
+      # Idempotent; a fresh container starts from the pristine image and gets
+      # re-patched on its next start.
+      if ! grep -q GH_CREDENTIAL_SOURCE /app/entrypoint.sh 2>/dev/null; then
+        cat > /app/entrypoint.sh.new <<'PRE'
+      #!/bin/sh
+      # GH_CREDENTIAL_SOURCE — patched by lpk setup_script; do not edit
+      f=/config/github-app.env
+      if [ -f "$f" ]; then
+        sed -i 's/\r$//' "$f"
+        set -a
+        . "$f" 2>/dev/null || true
+        set +a
+      fi
+      PRE
+        tail -n +2 /app/entrypoint.sh >> /app/entrypoint.sh.new
+        mv /app/entrypoint.sh.new /app/entrypoint.sh
+        chmod +x /app/entrypoint.sh
+      fi
+      if [ ! -f /config/github-app.env ]; then
+        cat > /config/github-app.env <<'TMPL'
+      # 填入 GitHub App 的数字 ID 与完整 PEM 私钥（保留 BEGIN/END 行和换行），
+      # 保存后重启应用生效。GITHUB_APP_SLUG / GITHUB_WEBHOOK_SECRET 已在安装
+      # 向导参数里，不要写在这里。
+      GITHUB_APP_ID=
+      GITHUB_APP_PRIVATE_KEY=""
+      TMPL
+        chmod 600 /config/github-app.env
+      fi
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+  frontend:
+    image: ghcr.io/multica-ai/multica-web:v0.6.1
+    environment:
+      - HOSTNAME=0.0.0.0
+      # server-side target for the Next runtime proxy (/auth/* backend
+      # endpoints and any path the gateway sends here); same as the image
+      # default, spelled out for clarity
+      - REMOTE_API_URL=http://backend:8080
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:3000/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
