@@ -1,5 +1,5 @@
 package: cloud.lazycat.app.multica
-version: 0.6.1
+version: 0.6.2
 name: Multica
 description: AI agent team collaboration platform - issues, projects, agents and autopilots in one workspace, self-hosted with Docker images from the official GHCR registry
 author: wuxiy
