@@ -96,7 +96,7 @@ services:
       start_period: 10s
 
   backend:
-    image: ghcr.io/multica-ai/multica-backend:v0.7.0
+    image: ghcr.io/multica-ai/multica-backend:v0.7.2
     environment:
       - DATABASE_URL=postgres://multica:multica@postgres:5432/multica?sslmode=disable
       - PORT=8080
@@ -174,7 +174,7 @@ services:
       start_period: 120s
 
   frontend:
-    image: ghcr.io/multica-ai/multica-web:v0.7.0
+    image: ghcr.io/multica-ai/multica-web:v0.7.2
     environment:
       - HOSTNAME=0.0.0.0
       # server-side target for the Next runtime proxy (/auth/* backend
