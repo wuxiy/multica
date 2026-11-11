@@ -54,12 +54,10 @@ application:
     - location: /v1/
       backend: http://backend:8080
       disable_trim_location: true
-    - location: /uploads
-      backend: http://backend:8080
-      disable_trim_location: true
-    - location: /uploads/
-      backend: http://backend:8080
-      disable_trim_location: true
+    # /uploads was dropped in upstream v0.8.2: the backend no longer serves a
+    # static /uploads/* route (avatars moved to /api/avatars/{sig}/*, local
+    # attachments to signed /api download URLs), so the frontend proxy stopped
+    # forwarding it too — nothing legitimately hits this prefix anymore
     # realtime WebSocket (exact path, matches the web client and the daemon)
     - location: /ws
       backend: http://backend:8080
@@ -73,7 +71,6 @@ application:
     # XHR/WebSocket; Multica's own auth (cookies / JWT) protects these
     - /api
     - /v1
-    - /uploads
     - /ws
     - /health
 
@@ -96,7 +93,7 @@ services:
       start_period: 10s
 
   backend:
-    image: ghcr.io/multica-ai/multica-backend:v0.8.1
+    image: ghcr.io/multica-ai/multica-backend:v0.8.2
     environment:
       - DATABASE_URL=postgres://multica:multica@postgres:5432/multica?sslmode=disable
       - PORT=8080
@@ -174,7 +171,7 @@ services:
       start_period: 120s
 
   frontend:
-    image: ghcr.io/multica-ai/multica-web:v0.8.1
+    image: ghcr.io/multica-ai/multica-web:v0.8.2
     environment:
       - HOSTNAME=0.0.0.0
       # server-side target for the Next runtime proxy (/auth/* backend
