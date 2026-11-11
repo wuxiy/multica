@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
+import { useReducedMotion } from "@multica/core/appearance";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { canAssignAgent } from "../../issues/components/pickers/assignee-picker";
@@ -72,7 +73,9 @@ import { useChatInputFocus } from "./use-chat-input-focus";
 import { useChatOpenReveal } from "./use-chat-open-reveal";
 import { ChatWindowMessages } from "./chat-window-messages";
 import { ChatInput } from "./chat-input";
+import { useChatAnnotations } from "./use-chat-annotations";
 import { ChatQueue } from "./chat-queue";
+import { ChatAppRequests } from "../../common/app-requests";
 import { EmptyState } from "./chat-empty-state";
 import { SessionRenameInput } from "./session-rename-input";
 import { SessionHistoryList } from "./session-history-list";
@@ -259,6 +262,11 @@ export function ChatWindow() {
   // (server confirmed: zero usable agents) drives the disabled UI.
   const agentAvailability = useWorkspaceAgentAvailability();
   const noAgent = agentAvailability === "none";
+  const annotations = useChatAnnotations({
+    sessionId: activeSessionId,
+    agentName: activeAgent?.name,
+    enabled: !isSessionArchived && !isAgentArchived && !isAgentAccessRevoked && activeAgentRuntimeBound && !noAgent,
+  });
 
   // Presence drives both the avatar status dot (via ActorAvatar) and the
   // OfflineBanner / TaskStatusPill availability copy. `useAgentPresenceDetail`
@@ -733,6 +741,7 @@ export function ChatWindow() {
   const isExpanded = useChatStore((s) => s.isExpanded);
 
   const { renderWidth, renderHeight, isAtMax, boundsReady, isDragging, toggleExpand, startDrag } = useChatResize(windowRef);
+  const reduceMotion = useReducedMotion();
   const { contentReady, markContentReady } = useChatOpenReveal(isOpen);
 
   const isVisible = isOpen && (isExpanded || boundsReady) && contentReady;
@@ -800,8 +809,18 @@ export function ChatWindow() {
   const contextItems = useChatContextItems(wsId);
   const queuedTasks = pendingTask?.queued_tasks ?? [];
 
+  const showRestore = isExpanded || isAtMax;
+  const newChatLabel = t(($) => $.window.new_chat_tooltip);
+  const expandLabel = showRestore
+    ? t(($) => $.window.restore_tooltip)
+    : t(($) => $.window.expand_tooltip);
+  const minimizeLabel = t(($) => $.window.minimize_tooltip);
+  const sizeTransition =
+    isDragging || reduceMotion ? { duration: 0 } : { type: "spring" as const, duration: 0.3, bounce: 0 };
+
   return (
     <motion.div
+      data-mc="chat-window"
       ref={windowRef}
       inert={!isOpen}
       aria-hidden={!isOpen}
@@ -813,8 +832,8 @@ export function ChatWindow() {
         ...motionSize,
       }}
       transition={{
-        width: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
-        height: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
+        width: sizeTransition,
+        height: sizeTransition,
         opacity: { duration: 0.15 },
       }}
     >
@@ -828,14 +847,15 @@ export function ChatWindow() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground"
+                  className="text-muted-foreground"
+                  aria-label={newChatLabel}
                   onClick={handleNewChat}
                 />
               }
             >
               <Plus />
             </TooltipTrigger>
-            <TooltipContent side="top">{t(($) => $.window.new_chat_tooltip)}</TooltipContent>
+            <TooltipContent side="top">{newChatLabel}</TooltipContent>
           </Tooltip>
           <SessionDropdown
             sessions={sessions}
@@ -855,15 +875,14 @@ export function ChatWindow() {
                     variant="ghost"
                     size="icon-sm"
                     className="text-muted-foreground"
+                    aria-label={expandLabel}
                     onClick={toggleExpand}
                   />
                 }
               >
-                {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
+                {showRestore ? <Minimize2 /> : <Maximize2 />}
               </TooltipTrigger>
-              <TooltipContent side="top">
-                {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
-              </TooltipContent>
+              <TooltipContent side="top">{expandLabel}</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>
@@ -873,6 +892,7 @@ export function ChatWindow() {
                   variant="ghost"
                   size="icon-sm"
                   className="text-muted-foreground"
+                  aria-label={minimizeLabel}
                   onClick={handleMinimize}
                 />
               }
@@ -880,7 +900,7 @@ export function ChatWindow() {
               <Minus />
             </TooltipTrigger>
             <TooltipContent side="top">
-              {t(($) => $.window.minimize_tooltip)}
+              {minimizeLabel}
               <ActionShortcutKeycaps action="toggleChat" />
             </TooltipContent>
           </Tooltip>
@@ -906,6 +926,7 @@ export function ChatWindow() {
             }
             quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
             onReady={markContentReady}
+            annotations={annotations}
           >
             <EmptyState
               agent={activeAgent}
@@ -940,6 +961,10 @@ export function ChatWindow() {
       ) : (
         <OfflineBanner agentName={activeAgent?.name} availability={availability} />
       )}
+
+      <div className="px-4">
+        <ChatAppRequests sessionId={activeSessionId} />
+      </div>
 
       <ChatQueue
         tasks={queuedTasks}
@@ -992,6 +1017,7 @@ export function ChatWindow() {
         }
         contextItems={contextItems}
         focusRequest={focusRequest}
+        annotations={annotations}
       />
     </motion.div>
   );
